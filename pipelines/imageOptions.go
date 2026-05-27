@@ -19,29 +19,21 @@ type imagePipeline interface {
 // to any pipeline that supports them (e.g., FeatureExtractionPipeline in image mode
 // and ImageClassificationPipeline). This avoids conflicting option names.
 func WithPreprocessSteps[T imagePipeline](steps ...imageutil.PreprocessStep) backends.PipelineOption[T] {
-	return func(p T) error {
-		p.addPreprocessSteps(steps...)
-		return nil
-	}
+	_ = "STUB: not implemented"
+	return nil
 }
 
 func WithNormalizationSteps[T imagePipeline](steps ...imageutil.NormalizationStep) backends.PipelineOption[T] {
-	return func(p T) error {
-		p.addNormalizationSteps(steps...)
-		return nil
-	}
+	_ = "STUB: not implemented"
+	return nil
 }
 
 func WithNCHWFormat[T imagePipeline]() backends.PipelineOption[T] {
-	return func(p T) error {
-		p.setImageFormat("NCHW")
-		return nil
-	}
+	_ = "STUB: not implemented"
+	return nil
 }
 
 func WithNHWCFormat[T imagePipeline]() backends.PipelineOption[T] {
-	return func(p T) error {
-		p.setImageFormat("NHWC")
-		return nil
-	}
+	_ = "STUB: not implemented"
+	return nil
 }

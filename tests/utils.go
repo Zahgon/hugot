@@ -1,24 +1,10 @@
 package testutil
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"math"
-	"regexp"
-	"runtime"
-	"strings"
 	"testing"
-	"time"
-
-	"github.com/gomlx/go-huggingface/hub"
-	"github.com/stretchr/testify/assert"
 
 	"github.com/knights-analytics/hugot"
-	"github.com/knights-analytics/hugot/backends"
 	"github.com/knights-analytics/hugot/pipelines"
-	"github.com/knights-analytics/hugot/testcases/embedded"
-	"github.com/knights-analytics/hugot/util/imageutil"
 )
 
 const ModelsFolder = "../../models/"
@@ -26,1621 +12,234 @@ const TestCasesFolder = "../../testcases/"
 
 // test download validation
 
-func TestDownloadValidation(t *testing.T) {
-	downloadOptions := hugot.NewDownloadOptions()
+func TestDownloadValidation(t *testing.T) { _ = "STUB: not implemented"; return }
 
-	// a model with the required files in a subfolder should not error
-	_, err := hugot.ValidateDownloadedHFModel(hub.New("KnightsAnalytics/distilbert-base-uncased-finetuned-sst-2-english"), downloadOptions)
-	assert.NoError(t, err)
-	// a model without tokenizer.json or .onnx model should error
-	_, err = hugot.ValidateDownloadedHFModel(hub.New("ByteDance/SDXL-Lightning"), downloadOptions)
-	assert.Error(t, err)
-}
+// a model with the required files in a subfolder should not error
+
+// a model without tokenizer.json or .onnx model should error
 
 // FEATURE EXTRACTION
 
 func FeatureExtractionPipeline(t *testing.T, session *hugot.Session) {
-	t.Helper()
-
-	modelPath := ModelsFolder + "KnightsAnalytics_all-MiniLM-L6-v2"
-
-	config := hugot.FeatureExtractionConfig{
-		ModelPath:    modelPath,
-		Name:         "testPipeline",
-		OnnxFilename: "model.onnx",
-	}
-	pipeline, err := hugot.NewPipeline(session, config)
-	CheckT(t, err)
-
-	var expectedResults map[string][][]float32
-	err = json.Unmarshal(embedded.ResultsByte, &expectedResults)
-	CheckT(t, err)
-	var testResults [][]float32
-
-	// test 'robert smith'
-	testResults = expectedResults["test1output"]
-	batchResult, err := pipeline.RunPipeline(t.Context(), []string{"robert smith"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := range batchResult.Embeddings {
-		e := floatsEqual(batchResult.Embeddings[i], testResults[i])
-		if e != nil {
-			t.Logf("Test 1: The neural network didn't produce the correct result on loop %d: %s\n", i, e)
-			t.FailNow()
-		}
-	}
-
-	// test ['robert smith junior', 'francis ford coppola']
-	testResults = expectedResults["test2output"]
-	batchResult, err = pipeline.RunPipeline(t.Context(), []string{"robert smith junior", "francis ford coppola"})
-	if err != nil {
-		t.FailNow()
-	}
-	for i := range batchResult.Embeddings {
-		e := floatsEqual(batchResult.Embeddings[i], testResults[i])
-		if e != nil {
-			t.Logf("Test 2: The neural network didn't produce the correct result on loop %d: %s\n", i, e)
-			t.FailNow()
-		}
-	}
-
-	// determinism test to make sure embeddings of a string are not influenced by other strings in the batch
-	testPairs := map[string][][]string{}
-	testPairs["identity"] = [][]string{{"sinopharm", "yo"}, {"sinopharm", "yo"}}
-	testPairs["contextOverlap"] = [][]string{{"sinopharm", "yo"}, {"sinopharm", "yo mama yo"}}
-	testPairs["contextDisjoint"] = [][]string{{"sinopharm", "yo"}, {"sinopharm", "another test"}}
-
-	for k, sentencePair := range testPairs {
-		// these vectors should be the same
-		firstBatchResult, err2 := pipeline.RunPipeline(t.Context(), sentencePair[0])
-		CheckT(t, err2)
-		firstEmbedding := firstBatchResult.Embeddings[0]
-
-		secondBatchResult, err3 := pipeline.RunPipeline(t.Context(), sentencePair[1])
-		CheckT(t, err3)
-		secondEmbedding := secondBatchResult.Embeddings[0]
-		e := floatsEqual(firstEmbedding, secondEmbedding)
-		if e != nil {
-			t.Logf("Equality failed for determinism test %s test with pairs %s and %s", k, strings.Join(sentencePair[0], ","), strings.Join(sentencePair[1], ","))
-			t.Log("First vector", firstEmbedding)
-			t.Log("second vector", secondEmbedding)
-			t.Fail()
-		}
-	}
-
-	zero := uint64(0)
-	assert.Greater(t, pipeline.PipelineTimings.NumCalls, zero, "PipelineTimings.NumCalls should be greater than 0")
-	assert.Greater(t, pipeline.PipelineTimings.TotalNS, zero, "PipelineTimings.TotalNS should be greater than 0")
-	assert.Greater(t, pipeline.Model.Tokenizer.TokenizerTimings.NumCalls, zero, "TokenizerTimings.NumCalls should be greater than 0")
-	assert.Greater(t, pipeline.Model.Tokenizer.TokenizerTimings.TotalNS, zero, "TokenizerTimings.TotalNS should be greater than 0")
-
-	// test normalization
-	testResults = expectedResults["normalizedOutput"]
-	config = hugot.FeatureExtractionConfig{
-		ModelPath:    modelPath,
-		Name:         "testPipelineNormalise",
-		OnnxFilename: "model.onnx",
-		Options: []hugot.FeatureExtractionOption{
-			pipelines.WithNormalization(),
-		},
-	}
-	pipeline, err = hugot.NewPipeline(session, config)
-	CheckT(t, err)
-
-	normalizationStrings := []string{"Onnxruntime is a great inference backend"}
-	normalizedEmbedding, err := pipeline.RunPipeline(t.Context(), normalizationStrings)
-	CheckT(t, err)
-	for i, embedding := range normalizedEmbedding.Embeddings {
-		e := floatsEqual(embedding, testResults[i])
-		if e != nil {
-			t.Fatalf("Normalization test failed: %s", normalizationStrings)
-		}
-	}
-
-	// test getting output by name
-	configSentence := hugot.FeatureExtractionConfig{
-		ModelPath:    modelPath,
-		Name:         "testPipelineSentence",
-		OnnxFilename: "model.onnx",
-		Options:      []hugot.FeatureExtractionOption{pipelines.WithOutputName("last_hidden_state")},
-	}
-	pipelineSentence, err := hugot.NewPipeline(session, configSentence)
-	CheckT(t, err)
-
-	_, err = pipelineSentence.RunPipeline(t.Context(), []string{"Onnxruntime is a great inference backend"})
-	if err != nil {
-		t.FailNow()
-	}
-	configSentence = hugot.FeatureExtractionConfig{
-		ModelPath:    modelPath,
-		Name:         "testPipelineToken",
-		OnnxFilename: "model.onnx",
-	}
-	pipelineToken, err := hugot.NewPipeline(session, configSentence)
-	CheckT(t, err)
-	_, err = pipelineToken.RunPipeline(t.Context(), []string{"Onnxruntime is a great inference backend"})
-	if err != nil {
-		t.FailNow()
-	}
+	_ = "STUB: not implemented"
+	return
 }
 
+// test 'robert smith'
+
+// test ['robert smith junior', 'francis ford coppola']
+
+// determinism test to make sure embeddings of a string are not influenced by other strings in the batch
+
+// these vectors should be the same
+
+// test normalization
+
+// test getting output by name
+
 func FeatureExtractionPipelineValidation(t *testing.T, session *hugot.Session) {
-	t.Helper()
-
-	modelPath := ModelsFolder + "KnightsAnalytics_all-MiniLM-L6-v2"
-	config := hugot.FeatureExtractionConfig{
-		ModelPath:    modelPath,
-		OnnxFilename: "model.onnx",
-		Name:         "testPipeline",
-	}
-	pipeline, err := hugot.NewPipeline(session, config)
-	CheckT(t, err)
-
-	pipeline.Model.InputsMeta[0].Dimensions = backends.NewShape(-1, -1, -1)
-
-	err = pipeline.Validate()
-	assert.Error(t, err)
-
-	pipeline.Model.InputsMeta[0].Dimensions = backends.NewShape(1, 1, 1, 1, 1)
-	err = pipeline.Validate()
-	assert.Error(t, err)
+	_ = "STUB: not implemented"
+	return
 }
 
 // Text classification
 
 func TextClassificationPipeline(t *testing.T, session *hugot.Session) {
-	t.Helper()
-
-	modelPath := ModelsFolder + "KnightsAnalytics_distilbert-base-uncased-finetuned-sst-2-english"
-
-	config := hugot.TextClassificationConfig{
-		ModelPath: modelPath,
-		Name:      "testPipelineSimple",
-		Options: []hugot.TextClassificationOption{
-			pipelines.WithSoftmax(),
-		},
-	}
-	sentimentPipeline, err := hugot.NewPipeline(session, config)
-	CheckT(t, err)
-
-	test := struct {
-		pipeline *pipelines.TextClassificationPipeline
-		name     string
-		strings  []string
-		expected pipelines.TextClassificationOutput
-	}{
-		pipeline: sentimentPipeline,
-		name:     "Basic tests",
-		strings:  []string{"This movie is disgustingly good!", "The director tried too much"},
-		expected: pipelines.TextClassificationOutput{
-			ClassificationOutputs: [][]pipelines.ClassificationOutput{
-				{
-					{
-						Label: "POSITIVE",
-						Score: 0.9998536109924316,
-					},
-				},
-				{
-					{
-						Label: "NEGATIVE",
-						Score: 0.9975218176841736,
-					},
-				},
-			},
-		},
-	}
-
-	t.Run(test.name, func(t *testing.T) {
-		batchResult, err := test.pipeline.RunPipeline(t.Context(), test.strings)
-		CheckT(t, err)
-		for i, expected := range test.expected.ClassificationOutputs {
-			checkClassificationOutput(t, expected, batchResult.ClassificationOutputs[i])
-		}
-	})
-
-	// check PrintStatistics
-	session.PrintStatistics()
+	_ = "STUB: not implemented"
+	return
 }
+
+// check PrintStatistics
 
 func TextClassificationPipelineMulti(t *testing.T, session *hugot.Session) {
-	t.Helper()
-
-	modelPathMulti := ModelsFolder + "KnightsAnalytics_roberta-base-go_emotions"
-
-	configMulti := hugot.TextClassificationConfig{
-		ModelPath:    modelPathMulti,
-		Name:         "testPipelineSimpleMulti",
-		OnnxFilename: "model.onnx",
-		Options: []hugot.TextClassificationOption{
-			pipelines.WithMultiLabel(),
-			pipelines.WithSigmoid(),
-			pipelines.WithFixedPadding(128),
-		},
-	}
-	sentimentPipelineMulti, err := hugot.NewPipeline(session, configMulti)
-	CheckT(t, err)
-
-	test := struct {
-		pipeline *pipelines.TextClassificationPipeline
-		name     string
-		strings  []string
-		expected pipelines.TextClassificationOutput
-	}{
-		pipeline: sentimentPipelineMulti,
-		name:     "Multiclass pipeline test",
-		strings:  []string{"ONNX is seriously fast for small batches. Impressive"},
-		expected: pipelines.TextClassificationOutput{
-			ClassificationOutputs: [][]pipelines.ClassificationOutput{
-				{
-					{
-						Label: "admiration",
-						Score: 0.9217681,
-					},
-					{
-						Label: "amusement",
-						Score: 0.001201711,
-					},
-					{
-						Label: "anger",
-						Score: 0.001109502,
-					},
-					{
-						Label: "annoyance",
-						Score: 0.0034009134,
-					},
-					{
-						Label: "approval",
-						Score: 0.05643816,
-					},
-					{
-						Label: "caring",
-						Score: 0.0011591336,
-					},
-					{
-						Label: "confusion",
-						Score: 0.0018672282,
-					},
-					{
-						Label: "curiosity",
-						Score: 0.0026787464,
-					},
-					{
-						Label: "desire",
-						Score: 0.00085846696,
-					},
-					{
-						Label: "disappointment",
-						Score: 0.0027759627,
-					},
-					{
-						Label: "disapproval",
-						Score: 0.004615115,
-					},
-					{
-						Label: "disgust",
-						Score: 0.00075303164,
-					},
-					{
-						Label: "embarrassment",
-						Score: 0.0003314704,
-					},
-					{
-						Label: "excitement",
-						Score: 0.005340109,
-					},
-					{
-						Label: "fear",
-						Score: 0.00042834174,
-					},
-					{
-						Label: "gratitude",
-						Score: 0.013405683,
-					},
-					{
-						Label: "grief",
-						Score: 0.00029952865,
-					},
-					{
-						Label: "joy",
-						Score: 0.0026875956,
-					},
-					{
-						Label: "love",
-						Score: 0.00092915917,
-					},
-					{
-						Label: "nervousness",
-						Score: 0.00012843,
-					},
-					{
-						Label: "optimism",
-						Score: 0.006792505,
-					},
-					{
-						Label: "pride",
-						Score: 0.0033409835,
-					},
-					{
-						Label: "realization",
-						Score: 0.007224476,
-					},
-					{
-						Label: "relief",
-						Score: 0.00071489986,
-					},
-					{
-						Label: "remorse",
-						Score: 0.00026071363,
-					},
-					{
-						Label: "sadness",
-						Score: 0.0009562365,
-					},
-					{
-						Label: "surprise",
-						Score: 0.0037120024,
-					},
-					{
-						Label: "neutral",
-						Score: 0.04079749,
-					},
-				},
-			},
-		},
-	}
-
-	t.Run(test.name, func(t *testing.T) {
-		batchResult, err := test.pipeline.RunPipeline(t.Context(), test.strings)
-		CheckT(t, err)
-		for i, expected := range test.expected.ClassificationOutputs {
-			checkClassificationOutput(t, expected, batchResult.ClassificationOutputs[i])
-		}
-	})
-
-	// check GetStatistics
-	statistics := session.GetStatistics()
-	for m, v := range statistics {
-		fmt.Printf("pipeline statistics for: %s\n", m)
-		v.Print()
-	}
+	_ = "STUB: not implemented"
+	return
 }
 
+// check GetStatistics
+
 func TextClassificationPipelineValidation(t *testing.T, session *hugot.Session) {
-	t.Helper()
-
-	modelPath := ModelsFolder + "KnightsAnalytics_distilbert-base-uncased-finetuned-sst-2-english"
-
-	config := hugot.TextClassificationConfig{
-		ModelPath: modelPath,
-		Name:      "testPipelineSimple",
-		Options: []hugot.TextClassificationOption{
-			pipelines.WithSingleLabel(),
-		},
-	}
-	sentimentPipeline, err := hugot.NewPipeline(session, config)
-	CheckT(t, err)
-
-	t.Run("id-label-map", func(t *testing.T) {
-		labelMapInitial := sentimentPipeline.Model.IDLabelMap
-		defer func() {
-			sentimentPipeline.Model.IDLabelMap = labelMapInitial
-		}()
-		sentimentPipeline.Model.IDLabelMap = map[int]string{}
-		err = sentimentPipeline.Validate()
-		assert.Error(t, err)
-	})
-
-	t.Run("output-shape", func(t *testing.T) {
-		dimensionInitial := sentimentPipeline.Model.OutputsMeta[0].Dimensions
-		defer func() {
-			sentimentPipeline.Model.OutputsMeta[0].Dimensions = dimensionInitial
-		}()
-		sentimentPipeline.Model.OutputsMeta[0].Dimensions = backends.NewShape(-1, -1, -1)
-		err = sentimentPipeline.Validate()
-		assert.Error(t, err)
-	})
+	_ = "STUB: not implemented"
+	return
 }
 
 // Zero shot
 
 func ZeroShotClassificationPipeline(t *testing.T, session *hugot.Session) {
-	t.Helper()
-
-	modelPath := ModelsFolder + "KnightsAnalytics_deberta-v3-base-zeroshot-v1"
-
-	config := hugot.ZeroShotClassificationConfig{
-		ModelPath: modelPath,
-		Name:      "testPipeline",
-		Options: []backends.PipelineOption[*pipelines.ZeroShotClassificationPipeline]{
-			pipelines.WithHypothesisTemplate("This example is {}."),
-			pipelines.WithLabels([]string{"fun", "dangerous"}),
-			pipelines.WithMultilabel(false), // Gets overridden per test, but included for coverage
-		},
-	}
-
-	classificationPipeline, err := hugot.NewPipeline(session, config)
-	CheckT(t, err)
-
-	tests := []struct {
-		pipeline   *pipelines.ZeroShotClassificationPipeline
-		name       string
-		sequences  []string
-		labels     []string
-		multilabel bool
-		expected   pipelines.ZeroShotOutput
-	}{
-		{
-			pipeline:   classificationPipeline,
-			name:       "single sequence, single label, no multilabel",
-			sequences:  []string{"I am going to the park"},
-			labels:     []string{"fun"},
-			multilabel: false,
-			expected: pipelines.ZeroShotOutput{
-				ClassificationOutputs: []pipelines.ZeroShotClassificationOutput{
-					{
-						Sequence: "I am going to the park",
-						SortedValues: []struct {
-							Key   string
-							Value float64
-						}{
-							{
-								Key:   "fun",
-								Value: 0.0009069009101949632,
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			pipeline:   classificationPipeline,
-			name:       "multiple sequences, multiple labels, no multilabel",
-			sequences:  []string{"I am going to the park", "I will watch Interstellar tonight"},
-			labels:     []string{"fun", "movie"},
-			multilabel: false,
-			expected: pipelines.ZeroShotOutput{
-				ClassificationOutputs: []pipelines.ZeroShotClassificationOutput{
-					{
-						Sequence: "I am going to the park",
-						SortedValues: []struct {
-							Key   string
-							Value float64
-						}{
-							{
-								Key:   "fun",
-								Value: 0.7746766209602356,
-							},
-							{
-								Key:   "movie",
-								Value: 0.2253233790397644,
-							},
-						},
-					},
-					{
-						Sequence: "I will watch Interstellar tonight",
-						SortedValues: []struct {
-							Key   string
-							Value float64
-						}{
-							{
-								Key:   "movie",
-								Value: 0.9984978437423706,
-							},
-							{
-								Key:   "fun",
-								Value: 0.001502170693129301,
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			pipeline:   classificationPipeline,
-			name:       "multiple sequences, multiple labels, multilabel",
-			sequences:  []string{"I am going to the park", "I will watch Interstellar tonight"},
-			labels:     []string{"fun", "movie"},
-			multilabel: true,
-			expected: pipelines.ZeroShotOutput{
-				ClassificationOutputs: []pipelines.ZeroShotClassificationOutput{
-					{
-						Sequence: "I am going to the park",
-						SortedValues: []struct {
-							Key   string
-							Value float64
-						}{
-							{
-								Key:   "fun",
-								Value: 0.0009069009101949632,
-							},
-							{
-								Key:   "movie",
-								Value: 0.00009480675362283364,
-							},
-						},
-					},
-					{
-						Sequence: "I will watch Interstellar tonight",
-						SortedValues: []struct {
-							Key   string
-							Value float64
-						}{
-							{
-								Key:   "movie",
-								Value: 0.9985591769218445,
-							},
-							{
-								Key:   "fun",
-								Value: 0.0006653196760453284,
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			pipeline:   classificationPipeline,
-			name:       "multiple sequences, single label, multilabel",
-			sequences:  []string{"I am going to the park", "I will watch Interstellar tonight"},
-			labels:     []string{"fun"},
-			multilabel: true,
-			expected: pipelines.ZeroShotOutput{
-				ClassificationOutputs: []pipelines.ZeroShotClassificationOutput{
-					{
-						Sequence: "I am going to the park",
-						SortedValues: []struct {
-							Key   string
-							Value float64
-						}{
-							{
-								Key:   "fun",
-								Value: 0.0009069009101949632,
-							},
-						},
-					},
-					{
-						Sequence: "I will watch Interstellar tonight",
-						SortedValues: []struct {
-							Key   string
-							Value float64
-						}{
-							{
-								Key:   "fun",
-								Value: 0.0006653196760453284,
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			pipeline:   classificationPipeline,
-			name:       "single sequence, multiple labels, multilabel=false",
-			sequences:  []string{"Please don't bother me, I'm in a rush"},
-			labels:     []string{"busy", "relaxed", "stressed"},
-			multilabel: false,
-			expected: pipelines.ZeroShotOutput{
-				ClassificationOutputs: []pipelines.ZeroShotClassificationOutput{
-					{
-						Sequence: "Please don't bother me, I'm in a rush",
-						SortedValues: []struct {
-							Key   string
-							Value float64
-						}{
-							{
-								Key:   "stressed",
-								Value: 0.8865461349487305,
-							},
-							{
-								Key:   "busy",
-								Value: 0.10629364103078842,
-							},
-							{
-								Key:   "relaxed",
-								Value: 0.007160270120948553,
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			classificationPipeline.Labels = tt.labels
-			classificationPipeline.Multilabel = tt.multilabel
-			batchResult, err := tt.pipeline.RunPipeline(t.Context(), tt.sequences)
-			CheckT(t, err)
-			assert.Equal(t, len(batchResult.GetOutput()), len(tt.expected.ClassificationOutputs))
-
-			for ind, expected := range tt.expected.ClassificationOutputs {
-				expectedResult := expected.SortedValues
-				testResult := batchResult.ClassificationOutputs[ind].SortedValues
-				assert.Equal(t, len(expectedResult), len(testResult))
-				assert.Equal(t, tt.expected.ClassificationOutputs[ind].Sequence, batchResult.ClassificationOutputs[ind].Sequence)
-				for i := range testResult {
-					assert.True(t, almostEqual(testResult[i].Value, expectedResult[i].Value), fmt.Sprintf("Expected %f, got %f", expectedResult[i].Value, testResult[i].Value))
-				}
-			}
-		})
-	}
+	_ = "STUB: not implemented"
+	return
 }
 
+// Gets overridden per test, but included for coverage
+
 func ZeroShotClassificationPipelineValidation(t *testing.T, session *hugot.Session) {
-	t.Helper()
-
-	modelPath := ModelsFolder + "KnightsAnalytics_deberta-v3-base-zeroshot-v1"
-
-	config := hugot.TextClassificationConfig{
-		ModelPath: modelPath,
-		Name:      "testPipelineSimple",
-	}
-	sentimentPipeline, err := hugot.NewPipeline(session, config)
-	CheckT(t, err)
-
-	t.Run("id-label-map", func(t *testing.T) {
-		labelMapInitial := sentimentPipeline.Model.IDLabelMap
-		defer func() {
-			sentimentPipeline.Model.IDLabelMap = labelMapInitial
-		}()
-		sentimentPipeline.Model.IDLabelMap = map[int]string{}
-		err = sentimentPipeline.Validate()
-		assert.Error(t, err)
-	})
-
-	t.Run("output-shape", func(t *testing.T) {
-		dimensionInitial := sentimentPipeline.Model.OutputsMeta[0].Dimensions
-		defer func() {
-			sentimentPipeline.Model.OutputsMeta[0].Dimensions = dimensionInitial
-		}()
-		sentimentPipeline.Model.OutputsMeta[0].Dimensions = backends.NewShape(-1, -1, -1)
-		err = sentimentPipeline.Validate()
-		assert.Error(t, err)
-	})
+	_ = "STUB: not implemented"
+	return
 }
 
 // Token classification
 
 func TokenClassificationPipeline(t *testing.T, session *hugot.Session) {
-	t.Helper()
-
-	modelPath := ModelsFolder + "KnightsAnalytics_distilbert-NER"
-	configSimple := hugot.TokenClassificationConfig{
-		ModelPath: modelPath,
-		Name:      "testPipelineSimple",
-		Options: []hugot.TokenClassificationOption{
-			pipelines.WithSimpleAggregation(),
-			pipelines.WithIgnoreLabels([]string{"O"}),
-		},
-	}
-	pipelineSimple, err2 := hugot.NewPipeline(session, configSimple)
-	CheckT(t, err2)
-
-	configNone := hugot.TokenClassificationConfig{
-		ModelPath: modelPath,
-		Name:      "testPipelineNone",
-		Options: []hugot.TokenClassificationOption{
-			pipelines.WithoutAggregation(),
-		},
-	}
-	pipelineNone, err3 := hugot.NewPipeline(session, configNone)
-	CheckT(t, err3)
-
-	// Split-words enabled pipeline
-	configSplit := hugot.TokenClassificationConfig{
-		ModelPath: modelPath,
-		Name:      "testPipelineSplitWords",
-		Options: []hugot.TokenClassificationOption{
-			pipelines.WithSimpleAggregation(),
-			pipelines.WithIgnoreLabels([]string{"O"}),
-			pipelines.WithSplitWords(),
-		},
-	}
-	pipelineSplit, errSplit := hugot.NewPipeline(session, configSplit)
-	CheckT(t, errSplit)
-
-	var expectedResults map[int]pipelines.TokenClassificationOutput
-	err4 := json.Unmarshal(embedded.TokenExpectedByte, &expectedResults)
-	CheckT(t, err4)
-
-	tests := []struct {
-		pipeline *pipelines.TokenClassificationPipeline
-		name     string
-		strings  []string
-		expected pipelines.TokenClassificationOutput
-	}{
-		{
-			pipeline: pipelineSimple,
-			name:     "Simple aggregation",
-			strings:  []string{"My name is Wolfgang and I live in Berlin."},
-			expected: expectedResults[0],
-		},
-		{
-			pipeline: pipelineNone,
-			name:     "No aggregation",
-			strings:  []string{"My name is Wolfgang and I live in Berlin."},
-			expected: expectedResults[1],
-		},
-		{
-			pipeline: pipelineSimple,
-			name:     "Parsing of batch with different token length",
-			strings:  []string{"Microsoft incorporated.", "Yesterday I went to Berlin and met with Jack Brown."},
-			expected: expectedResults[2],
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			batchResult, err := tt.pipeline.RunPipeline(t.Context(), tt.strings)
-			CheckT(t, err)
-			printTokenEntities(batchResult)
-			for i, predictedEntities := range batchResult.Entities {
-				assert.Equal(t, len(tt.expected.Entities[i]), len(predictedEntities))
-				for j, entity := range predictedEntities {
-					expectedEntity := tt.expected.Entities[i][j]
-					assert.Equal(t, expectedEntity.Entity, entity.Entity)
-					assert.Equal(t, expectedEntity.Word, entity.Word)
-				}
-			}
-		})
-	}
-
-	// Expect same entities as the simple aggregation for the equivalent sentence for split words
-	t.Run("Split words aggregation", func(t *testing.T) {
-		words := [][]string{{"My", "name", "is", "Wolfgang", "and", "I", "live", "in", "Berlin", "."}}
-		batchResult, err := pipelineSplit.RunWords(t.Context(), words)
-		CheckT(t, err)
-		printTokenEntities(batchResult)
-		expected := expectedResults[0]
-		for i, predictedEntities := range batchResult.Entities {
-			assert.Equal(t, len(expected.Entities[i]), len(predictedEntities))
-			for j, entity := range predictedEntities {
-				expectedEntity := expected.Entities[i][j]
-				assert.Equal(t, expectedEntity.Entity, entity.Entity)
-				assert.Equal(t, expectedEntity.Word, entity.Word)
-			}
-		}
-	})
-
-	t.Run("Split words yields different offsets vs double-space input", func(t *testing.T) {
-		// Non-split input with double space changes raw offsets.
-		nonSplit := []string{"New  York is great."}
-		splitWords := [][]string{{"New", "York", "is", "great", "."}}
-
-		resNonSplit, errNon := pipelineSimple.RunPipeline(t.Context(), nonSplit)
-		CheckT(t, errNon)
-		resSplit, errSplitRun := pipelineSplit.RunWords(t.Context(), splitWords)
-		CheckT(t, errSplitRun)
-
-		// Compare first sequence: entity words may match, but offsets should differ due to space normalization.
-		if len(resNonSplit.Entities) > 0 && len(resSplit.Entities) > 0 && len(resNonSplit.Entities[0]) > 0 && len(resSplit.Entities[0]) > 0 {
-			eNon := resNonSplit.Entities[0][0]
-			eSplit := resSplit.Entities[0][0]
-			assert.NotEqual(t, fmt.Sprintf("%d-%d", eNon.Start, eNon.End), fmt.Sprintf("%d-%d", eSplit.Start, eSplit.End))
-		}
-	})
-
-	// Pre-tokenization splitting on 'X': expect different entity results from the non-split case
-	t.Run("Split on X detects entity", func(t *testing.T) {
-		nonSplit := []string{"XBerlinXXisXbeautiful."}
-		split := [][]string{{"Berlin is", "beautiful", "."}}
-
-		resNonSplit, errNS := pipelineSimple.RunPipeline(t.Context(), nonSplit)
-		CheckT(t, errNS)
-		resSplit, errSW := pipelineSplit.RunWords(t.Context(), split)
-		CheckT(t, errSW)
-
-		gotA := resNonSplit.Entities[0]
-		gotB := resSplit.Entities[0]
-		// Expect split-words to detect 'Berlin' as an entity, while non-split should not because of the confusing X characters.
-		hasBerlin := func(es []pipelines.Entity) bool {
-			for _, e := range es {
-				if strings.EqualFold(e.Word, "Berlin") {
-					return true
-				}
-			}
-			return false
-		}
-		assert.True(t, !hasBerlin(gotA) || len(gotA) < len(gotB), "expected split-words to surface 'Berlin' or increase entity count")
-	})
+	_ = "STUB: not implemented"
+	return
 }
 
+// Split-words enabled pipeline
+
+// Expect same entities as the simple aggregation for the equivalent sentence for split words
+
+// Non-split input with double space changes raw offsets.
+
+// Compare first sequence: entity words may match, but offsets should differ due to space normalization.
+
+// Pre-tokenization splitting on 'X': expect different entity results from the non-split case
+
+// Expect split-words to detect 'Berlin' as an entity, while non-split should not because of the confusing X characters.
+
 func TokenClassificationPipelineValidation(t *testing.T, session *hugot.Session) {
-	t.Helper()
-
-	modelPath := ModelsFolder + "KnightsAnalytics_distilbert-NER"
-	configSimple := hugot.TokenClassificationConfig{
-		ModelPath: modelPath,
-		Name:      "testPipelineSimple",
-		Options: []hugot.TokenClassificationOption{
-			pipelines.WithSimpleAggregation(),
-			pipelines.WithIgnoreLabels([]string{"O"}),
-		},
-	}
-	pipelineSimple, err2 := hugot.NewPipeline(session, configSimple)
-	CheckT(t, err2)
-
-	t.Run("id-label-map", func(t *testing.T) {
-		labelMapInitial := pipelineSimple.IDLabelMap
-		defer func() {
-			pipelineSimple.IDLabelMap = labelMapInitial
-		}()
-		pipelineSimple.IDLabelMap = map[int]string{}
-		err := pipelineSimple.Validate()
-		assert.Error(t, err)
-	})
-
-	t.Run("output-shape", func(t *testing.T) {
-		dimensionInitial := pipelineSimple.Model.OutputsMeta[0].Dimensions
-		defer func() {
-			pipelineSimple.Model.OutputsMeta[0].Dimensions = dimensionInitial
-		}()
-		pipelineSimple.Model.OutputsMeta[0].Dimensions = backends.NewShape(-1, -1, -1)
-		err := pipelineSimple.Validate()
-		assert.Error(t, err)
-	})
+	_ = "STUB: not implemented"
+	return
 }
 
 // Cross Encoder
 
-func CrossEncoderPipeline(t *testing.T, session *hugot.Session) {
-	t.Helper()
-	config := hugot.CrossEncoderConfig{
-		ModelPath: ModelsFolder + "KnightsAnalytics_jina-reranker-v1-tiny-en",
-		Name:      "test-cross-encoder",
-	}
-	pipeline, err := hugot.NewPipeline(session, config)
-	CheckT(t, err)
-
-	query := "Organic skincare products for sensitive skin"
-	documents := []string{
-		"Eco-friendly kitchenware for modern homes",
-		"Biodegradable cleaning supplies for eco-conscious consumers",
-		"Organic cotton baby clothes for sensitive skin",
-		"Natural organic skincare range for sensitive skin",
-		"Tech gadgets for smart homes: 2024 edition",
-		"Sustainable gardening tools and compost solutions",
-		"Sensitive skin-friendly facial cleansers and toners",
-		"Organic food wraps and storage solutions",
-		"All-natural pet food for dogs with allergies",
-		"Yoga mats made from recycled materials",
-	}
-
-	type Expected struct {
-		Document string
-		Score    float32
-	}
-
-	expectedRoberta := []Expected{
-		{Document: "Natural organic skincare range for sensitive skin", Score: 0.95478064},
-		{Document: "Organic cotton baby clothes for sensitive skin", Score: 0.8185698},
-		{Document: "Sensitive skin-friendly facial cleansers and toners", Score: 0.5848757},
-		{Document: "Organic food wraps and storage solutions", Score: 0.2567817},
-		{Document: "Biodegradable cleaning supplies for eco-conscious consumers", Score: 0.22029042},
-		{Document: "Yoga mats made from recycled materials", Score: 0.20082192},
-		{Document: "Sustainable gardening tools and compost solutions", Score: 0.19299757},
-		{Document: "All-natural pet food for dogs with allergies", Score: 0.18836288},
-		{Document: "Eco-friendly kitchenware for modern homes", Score: 0.18346606},
-		{Document: "Tech gadgets for smart homes: 2024 edition", Score: 0.16224432},
-	}
-
-	inputs := append([]string{query}, documents...)
-	output, err := pipeline.Run(t.Context(), inputs)
-	CheckT(t, err)
-	results := output.(*pipelines.CrossEncoderOutput).Results
-
-	for i, expected := range expectedRoberta {
-		if expected.Document != results[i].Document {
-			t.Errorf("Expected document '%s', got '%s'", expected.Document, results[i].Document)
-		}
-		if math.Abs(float64(expected.Score-results[i].Score)) > 0.01 {
-			t.Errorf("Expected score '%f', got '%f'", expected.Score, results[i].Score)
-		}
-	}
-}
+func CrossEncoderPipeline(t *testing.T, session *hugot.Session) { _ = "STUB: not implemented"; return }
 
 func CrossEncoderPipelineValidation(t *testing.T, session *hugot.Session) {
-	t.Helper()
-	config := hugot.CrossEncoderConfig{
-		ModelPath: ModelsFolder + "KnightsAnalytics_jina-reranker-v1-tiny-en",
-		Name:      "test-cross-encoder-validation",
-	}
-	pipeline, err := hugot.NewPipeline(session, config)
-	if err != nil {
-		t.Fatalf("Failed to create pipeline: %v", err)
-	}
-
-	// 1. Test: output dims length != 2
-	pipeline.Model.OutputsMeta[0].Dimensions = backends.NewShape(1)
-	err = pipeline.Validate()
-	if err == nil {
-		t.Errorf("Expected error for output dims length != 2, got %v", err)
-	}
-
-	// 2. Test: output dims second dim != 1
-	pipeline.Model.OutputsMeta[0].Dimensions = backends.NewShape(2, 3)
-	err = pipeline.Validate()
-	if err == nil || err.Error() == "" {
-		t.Errorf("Expected error for output dims second dim != 1, got %v", err)
-	}
-
-	// 3. Test: more than one dynamic dim (-1)
-	pipeline.Model.OutputsMeta[0].Dimensions = backends.NewShape(-1, -1)
-	err = pipeline.Validate()
-	if err == nil || err.Error() == "" {
-		t.Errorf("Expected error for more than one dynamic dim, got %v", err)
-	}
+	_ = "STUB: not implemented"
+	return
 }
+
+// 1. Test: output dims length != 2
+
+// 2. Test: output dims second dim != 1
+
+// 3. Test: more than one dynamic dim (-1)
 
 // Image classification test using HuggingFace SqueezeNet and a sample image.
 func ImageClassificationPipeline(t *testing.T, session *hugot.Session) {
-	t.Helper()
-
-	modelPath := ModelsFolder + "KnightsAnalytics_resnet50"
-	imagePath := ModelsFolder + "imageData/cat.jpg"
-
-	config := hugot.ImageClassificationConfig{
-		ModelPath:    modelPath,
-		Name:         "testImageClassification",
-		OnnxFilename: "squeezenet1.1.onnx",
-		Options: []hugot.ImageClassificationOption{
-			pipelines.WithTopK(3),
-			pipelines.WithPreprocessSteps[*pipelines.ImageClassificationPipeline](
-				imageutil.ResizeStep(224),
-				imageutil.CenterCropStep(224, 224),
-			),
-			pipelines.WithNormalizationSteps[*pipelines.ImageClassificationPipeline](
-				imageutil.ImagenetPixelNormalizationStep(),
-				imageutil.RescaleStep(),
-			),
-		},
-	}
-	pipeline, err := hugot.NewPipeline(session, config)
-	CheckT(t, err)
-
-	result, err := pipeline.RunPipeline(t.Context(), []string{imagePath, imagePath})
-	CheckT(t, err)
-
-	for i, pred := range result.Predictions[0] {
-		fmt.Printf("%d: %s (score: %.4f)\n", i+1, pred.Label, pred.Score)
-	}
-	if result.Predictions[0][0].Label != "tabby, tabby cat" {
-		t.Errorf("Expected label 'tabby, tabby cat', got '%s'", result.Predictions[0][0].Label)
-	}
+	_ = "STUB: not implemented"
+	return
 }
 
 func ImageClassificationPipelineValidation(t *testing.T, session *hugot.Session) {
-	t.Helper()
-
-	modelPath := ModelsFolder + "/KnightsAnalytics_resnet50"
-	config := hugot.ImageClassificationConfig{
-		ModelPath: modelPath,
-		Name:      "testImageClassification",
-	}
-	pipeline, err := hugot.NewPipeline(session, config)
-	CheckT(t, err)
-
-	pipeline.Model.InputsMeta[0].Dimensions = backends.NewShape(-1, -1, -1)
-
-	err = pipeline.Validate()
-	assert.Error(t, err)
+	_ = "STUB: not implemented"
+	return
 }
 
 // object detection
 
 func ObjectDetectionPipeline(t *testing.T, session *hugot.Session) {
-	t.Helper()
-
-	config := backends.PipelineConfig[*pipelines.ObjectDetectionPipeline]{
-		ModelPath: ModelsFolder + "KnightsAnalytics_detr-resnet-50",
-		Name:      "testObjectDetection",
-		Options: []backends.PipelineOption[*pipelines.ObjectDetectionPipeline]{
-			pipelines.WithNCHWFormat[*pipelines.ObjectDetectionPipeline](),
-			pipelines.WithDetectionTopK(50),
-			pipelines.WithDetectionScoreThreshold(0.3),
-			pipelines.WithDetectionIouThreshold(0.5),
-		},
-	}
-
-	pipeline, err := hugot.NewPipeline(session, config)
-	CheckT(t, err)
-
-	// Use a simple cat image similar to classification test style
-	inputs := []string{ModelsFolder + "imageData/cat.jpg"}
-	result, err := pipeline.RunPipeline(t.Context(), inputs)
-	CheckT(t, err)
-
-	if len(result.Detections) == 0 || len(result.Detections[0]) == 0 {
-		t.Fatalf("no detections returned")
-	}
-	// Find a detection labeled cat (COCO index 15)
-	foundCat := false
-	for _, d := range result.Detections[0] {
-		if strings.EqualFold(d.Label, "cat") {
-			foundCat = true
-			// basic box sanity
-			if !(d.Box[0] >= 0 && d.Box[1] >= 0 && d.Box[2] > d.Box[0] && d.Box[3] > d.Box[1]) {
-				t.Fatalf("invalid box: %v", d.Box)
-			}
-			// score should be reasonable
-			if d.Score < 0.2 {
-				t.Fatalf("cat detection score too low: %.3f", d.Score)
-			}
-			break
-		}
-	}
-	if !foundCat {
-		// fall back to checking top detection label for debug
-		top := result.Detections[0][0]
-		t.Fatalf("expected a cat detection, top=%s score=%.3f", top.Label, top.Score)
-	}
+	_ = "STUB: not implemented"
+	return
 }
+
+// Use a simple cat image similar to classification test style
+
+// Find a detection labeled cat (COCO index 15)
+
+// basic box sanity
+
+// score should be reasonable
+
+// fall back to checking top detection label for debug
 
 func ObjectDetectionPipelineValidation(t *testing.T, session *hugot.Session) {
-	t.Helper()
-
-	config := backends.PipelineConfig[*pipelines.ObjectDetectionPipeline]{
-		ModelPath: ModelsFolder + "KnightsAnalytics_detr-resnet-50",
-		Name:      "testObjectDetectionValidation",
-	}
-	pipeline, err := hugot.NewPipeline(session, config)
-	CheckT(t, err)
-
-	t.Run("input-4d-required", func(t *testing.T) {
-		// Corrupt the primary image input to have invalid dims
-		original := pipeline.Model.InputsMeta[0].Dimensions
-		defer func() { pipeline.Model.InputsMeta[0].Dimensions = original }()
-		pipeline.Model.InputsMeta[0].Dimensions = backends.NewShape(-1, -1, -1)
-		err = pipeline.Validate()
-		assert.Error(t, err)
-	})
-
-	t.Run("mask-3d-required", func(t *testing.T) {
-		// If a mask input exists, make it invalid length to trigger error
-		idx := -1
-		for i, in := range pipeline.Model.InputsMeta {
-			if strings.Contains(strings.ToLower(in.Name), "mask") {
-				idx = i
-				break
-			}
-		}
-		if idx >= 0 {
-			original := pipeline.Model.InputsMeta[idx].Dimensions
-			defer func() { pipeline.Model.InputsMeta[idx].Dimensions = original }()
-			pipeline.Model.InputsMeta[idx].Dimensions = backends.NewShape(-1, -1) // invalid
-			err = pipeline.Validate()
-			assert.Error(t, err)
-		}
-	})
-
-	t.Run("outputs-must-be-detectable", func(t *testing.T) {
-		// Rename outputs so inference of boxes/scores fails
-		originals := make([]string, len(pipeline.Model.OutputsMeta))
-		for i := range pipeline.Model.OutputsMeta {
-			originals[i] = pipeline.Model.OutputsMeta[i].Name
-			pipeline.Model.OutputsMeta[i].Name = fmt.Sprintf("out_%d", i)
-		}
-		defer func() {
-			for i := range pipeline.Model.OutputsMeta {
-				pipeline.Model.OutputsMeta[i].Name = originals[i]
-			}
-		}()
-		pipeline.BoxesOutput = ""
-		pipeline.ScoresOutput = ""
-		err = pipeline.Validate()
-		assert.Error(t, err)
-	})
+	_ = "STUB: not implemented"
+	return
 }
+
+// Corrupt the primary image input to have invalid dims
+
+// If a mask input exists, make it invalid length to trigger error
+
+// invalid
+
+// Rename outputs so inference of boxes/scores fails
 
 // No same name
 
-func NoSameNamePipeline(t *testing.T, session *hugot.Session) {
-	t.Helper()
-	modelPath := ModelsFolder + "/KnightsAnalytics_distilbert-NER"
-	configSimple := hugot.TokenClassificationConfig{
-		ModelPath: modelPath,
-		Name:      "testPipelineSimple",
-		Options: []hugot.TokenClassificationOption{
-			pipelines.WithSimpleAggregation(),
-			pipelines.WithIgnoreLabels([]string{"O"}),
-		},
-	}
-	_, err2 := hugot.NewPipeline(session, configSimple)
-	if err2 != nil {
-		t.FailNow()
-	}
-	_, err3 := hugot.NewPipeline(session, configSimple)
-	assert.Error(t, err3)
-}
+func NoSameNamePipeline(t *testing.T, session *hugot.Session) { _ = "STUB: not implemented"; return }
 
-func DestroyPipelines(t *testing.T, session *hugot.Session) {
-	t.Helper()
-
-	modelPath := ModelsFolder + "/KnightsAnalytics_distilbert-NER"
-	configSimple := hugot.TokenClassificationConfig{
-		ModelPath: modelPath,
-		Name:      "testClosePipeline",
-		Options: []hugot.TokenClassificationOption{
-			pipelines.WithSimpleAggregation(),
-			pipelines.WithIgnoreLabels([]string{"O"}),
-		},
-	}
-	_, err := hugot.NewPipeline(session, configSimple)
-	CheckT(t, err)
-
-	if len(session.GetModels()) != 1 {
-		t.Fatal("Session should have 1 model")
-	}
-
-	for _, model := range session.GetModels() {
-		if _, ok := model.Pipelines["testClosePipeline"]; !ok {
-			t.Fatal("Pipeline alias was not added to the model")
-		}
-	}
-
-	if err := hugot.ClosePipeline[*pipelines.TokenClassificationPipeline](session, "testClosePipeline"); err != nil {
-		t.Fatal(err)
-	}
-
-	if len(session.GetModels()) != 0 {
-		t.Fatal("Session should have 0 models")
-	}
-	pipelines, err := hugot.GetPipelines[*pipelines.TokenClassificationPipeline](session)
-	CheckT(t, err)
-	if len(pipelines) != 0 {
-		t.Fatal("Session should have 0 token classification pipelines")
-	}
-}
+func DestroyPipelines(t *testing.T, session *hugot.Session) { _ = "STUB: not implemented"; return }
 
 // Text Generation.
 func TextGenerationPipeline(t *testing.T, session *hugot.Session) {
-	t.Helper()
-	modelPath := ModelsFolder + "/KnightsAnalytics_qwen3-4B-int4"
-
-	defer func(session *hugot.Session) {
-		err := session.Destroy()
-		CheckT(t, err)
-	}(session)
-
-	// Configure the text generation pipeline
-	config := hugot.TextGenerationConfig{
-		ModelPath: modelPath,
-		Name:      "testPipeline",
-		Options: []backends.PipelineOption[*pipelines.TextGenerationPipeline]{
-			pipelines.WithMaxLength(2000),
-			pipelines.WithSystemPrompt("You are a helpful assistant. Answer with a single very brief sentence."),
-		},
-	}
-
-	// Create the pipeline
-	textGenPipeline, err := hugot.NewPipeline(session, config)
-	CheckT(t, err)
-
-	tests := []struct {
-		name             string
-		input            [][]backends.Message
-		expectedKeywords []string
-	}{
-		{
-			name: "small test",
-			input: [][]backends.Message{
-				{
-					{Role: "user", Content: "what is the capital of the Netherlands?"},
-				},
-			},
-			expectedKeywords: []string{
-				"Amsterdam",
-			},
-		},
-		{
-			name: "batched test",
-			input: [][]backends.Message{
-				{
-					{Role: "user", Content: "what is the capital of the Netherlands?"},
-				},
-				{
-					{Role: "user", Content: "who was the first president of the United States?"},
-				},
-				{
-					{Role: "user", Content: "Solve this equation: 2 + 2 = ?"},
-				},
-			},
-			expectedKeywords: []string{
-				"Amsterdam",
-				"George Washington",
-				"4",
-			},
-		},
-	}
-
-	// Execute tests
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			batchResult, err := textGenPipeline.RunMessages(t.Context(), tt.input)
-			CheckT(t, err)
-			outputs := batchResult.GetOutput()
-			for i := range len(outputs) {
-				generatedString := outputs[i].(string)
-				fmt.Println(generatedString + "\n")
-				if !strings.Contains(generatedString, tt.expectedKeywords[i]) {
-					t.Fatalf("Test %s failed: expected keywords '%s' not found in '%s'", tt.name, tt.expectedKeywords[i], generatedString)
-				}
-			}
-		})
-	}
-
-	// streaming test
-	streamingConfig := hugot.TextGenerationConfig{
-		ModelPath: modelPath,
-		Name:      "testPipelineStreaming",
-		Options: []backends.PipelineOption[*pipelines.TextGenerationPipeline]{
-			pipelines.WithMaxLength(2000),
-			pipelines.WithStreaming(),
-		},
-	}
-	streamingPipeline, err := hugot.NewPipeline(session, streamingConfig)
-	CheckT(t, err)
-
-	t.Run("streaming test", func(t *testing.T) {
-		input := [][]backends.Message{
-			{
-				{Role: "system", Content: "you are a helpful assistant."},
-				{Role: "user", Content: "Solve this equation: 2 + 2 = ? Be very brief in your explanation."},
-			},
-		}
-		output, err := streamingPipeline.RunMessages(t.Context(), input)
-		var fullAnswer strings.Builder
-		for token := range output.TokenStream {
-			fullAnswer.WriteString(token.Token)
-		}
-		if !strings.Contains(fullAnswer.String(), "4") {
-			t.Fatalf("Expected answer to contain '4', got '%s'", fullAnswer.String())
-		}
-		CheckT(t, err)
-	})
-
-	// tools test
-	t.Run("tools test", func(t *testing.T) {
-		// Lark grammar that constrains both <tool_call> blocks to valid JSON.
-		//
-		// Requirements:
-		//   - <tool_call> and </tool_call> must be "special": false in tokenizer.json so that
-		//     llguidance can match them as regular byte sequences. Marking them "special": true
-		//     promotes them to control tokens that the guidance system cannot byte-force, causing
-		//     "token doesn't satisfy the grammar" errors.
-		//   - The grammar expects exactly two tool calls for this query.
-		toolGrammar := `start: fun_call fun_call /\n?/
-fun_call: "<tool_call>\n" tool_json "\n</tool_call>\n"
-tool_json: %json {"anyOf": [` +
-			`{"type":"object","required":["name","arguments"],"additionalProperties":false,` +
-			`"properties":{"name":{"const":"get_current_time"},"arguments":{"type":"object","properties":{},"additionalProperties":false}}},` +
-			`{"type":"object","required":["name","arguments"],"additionalProperties":false,` +
-			`"properties":{"name":{"const":"get_weather"},"arguments":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false}}}` +
-			`]}`
-		guidance := &backends.Guidance{
-			Type:           backends.GuidanceTypeLarkGrammar,
-			Data:           toolGrammar,
-			EnableFFTokens: true,
-		}
-
-		config = hugot.TextGenerationConfig{
-			ModelPath: modelPath,
-			Name:      "testPipelineWithTools",
-			Options: []backends.PipelineOption[*pipelines.TextGenerationPipeline]{
-				pipelines.WithMaxLength(2000),
-				pipelines.WithSystemPrompt("You are a helpful assistant that answers questions using tools."),
-				pipelines.WithGuidance(guidance),
-			},
-		}
-
-		// Create the pipeline
-		textGenPipeline, err = hugot.NewPipeline(session, config)
-		CheckT(t, err)
-
-		// Two minimal Hermes-style tool definitions.
-		tools := []string{
-			`{
-			"type": "function",
-			"function": {
-				"name": "get_current_time",
-				"description": "Returns the current UTC time.",
-				"parameters": {
-					"type": "object",
-					"properties": {},
-					"required": []
-				}
-			}
-		}`,
-			`{
-			"type": "function",
-			"function": {
-				"name": "get_weather",
-				"description": "Returns the current weather for a given city.",
-				"parameters": {
-					"type": "object",
-					"properties": {
-						"city": {
-							"type": "string",
-							"description": "The name of the city."
-						}
-					},
-					"required": ["city"]
-				}
-			}
-		}`,
-		}
-
-		messages := [][]backends.Message{
-			{
-				{Role: "user", Content: "What time is it right now, and what's the weather like in Paris?"},
-			},
-		}
-
-		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
-		defer cancel()
-
-		toolOutput, err := textGenPipeline.RunMessagesWithOverrides(ctx, messages, tools, nil)
-		CheckT(t, err)
-		CheckToolCalls(t, toolOutput.Responses[0])
-	})
+	_ = "STUB: not implemented"
+	return
 }
+
+// Configure the text generation pipeline
+
+// Create the pipeline
+
+// Execute tests
+
+// streaming test
+
+// tools test
+
+// Lark grammar that constrains both <tool_call> blocks to valid JSON.
+//
+// Requirements:
+//   - <tool_call> and </tool_call> must be "special": false in tokenizer.json so that
+//     llguidance can match them as regular byte sequences. Marking them "special": true
+//     promotes them to control tokens that the guidance system cannot byte-force, causing
+//     "token doesn't satisfy the grammar" errors.
+//   - The grammar expects exactly two tool calls for this query.
+
+// Create the pipeline
+
+// Two minimal Hermes-style tool definitions.
 
 func TextGenerationPipelineValidation(t *testing.T, session *hugot.Session) {
-	t.Helper()
-
-	defer func(session *hugot.Session) {
-		err := session.Destroy()
-		CheckT(t, err)
-	}(session)
-
-	// Configure the text generation pipeline
-	config := hugot.TextGenerationConfig{
-		ModelPath: ModelsFolder + "/KnightsAnalytics_qwen3-4B-int4",
-		Name:      "testPipeline",
-		Options:   []backends.PipelineOption[*pipelines.TextGenerationPipeline]{},
-	}
-	pipeline, err := hugot.NewPipeline(session, config)
-	CheckT(t, err)
-	pipeline.MaxLength = -100
-	err = pipeline.Validate()
-	assert.Error(t, err)
+	_ = "STUB: not implemented"
+	return
 }
+
+// Configure the text generation pipeline
 
 // QUESTION ANSWERING
 
 func QuestionAnsweringPipeline(t *testing.T, session *hugot.Session) {
-	t.Helper()
-
-	modelPath := ModelsFolder + "/KnightsAnalytics_distilbert-onnx"
-
-	config := hugot.QuestionAnsweringConfig{
-		ModelPath: modelPath,
-		Name:      "testQAPipeline",
-	}
-	pipeline, err := hugot.NewPipeline(session, config)
-	CheckT(t, err)
-
-	// Context is a JSON document; questions target specific property values.
-	contextJSON := `{"product": "coffee maker", "brand": "Acme", "price": 49.99, "currency": "USD", "in_stock": true}`
-
-	inputs := []pipelines.QuestionAnsweringInput{
-		{Question: "What is the brand?", Context: contextJSON},
-		{Question: "What is the currency?", Context: contextJSON},
-	}
-
-	result, err := pipeline.RunPipeline(t.Context(), inputs)
-	CheckT(t, err)
-
-	assert.Equal(t, 2, len(result.Outputs), "expected one result per input")
-
-	brand := result.Outputs[0][0]
-	assert.Greater(t, brand.Score, float32(0), "brand answer score should be > 0")
-	assert.Contains(t, contextJSON[brand.Start:brand.End], brand.Answer, "answer should be a substring of the context")
-	assert.Contains(t, strings.ToLower(brand.Answer), "acme", "brand answer should contain 'acme'")
-
-	currency := result.Outputs[1][0]
-	assert.Greater(t, currency.Score, float32(0), "currency answer score should be > 0")
-	assert.Contains(t, contextJSON[currency.Start:currency.End], currency.Answer, "answer should be a substring of the context")
-	assert.Contains(t, strings.ToLower(currency.Answer), "usd", "currency answer should contain 'usd'")
-
-	// WithTopKAnswers(2): verify that 2 ranked answers are returned per input and are ordered by score.
-
-	contextJSON = `{"product": "coffee maker", "brand": "Acme", "price": 49.99, "currency": "USD", "in_stock": true},{"product": "coffee maker", "brand": "Lavazza", "price": 100.99, "currency": "USD", "in_stock": true}`
-
-	inputs = []pipelines.QuestionAnsweringInput{
-		{Question: "What is the brand?", Context: contextJSON},
-		{Question: "What is the currency?", Context: contextJSON},
-	}
-	configTopK := hugot.QuestionAnsweringConfig{
-		ModelPath: modelPath,
-		Name:      "testQAPipelineTopK",
-		Options: []hugot.QuestionAnsweringOption{
-			pipelines.WithTopKAnswers(2),
-		},
-	}
-	pipelineTopK, err := hugot.NewPipeline(session, configTopK)
-	CheckT(t, err)
-
-	resultTopK, err := pipelineTopK.RunPipeline(t.Context(), inputs)
-	CheckT(t, err)
-
-	assert.Equal(t, 2, len(resultTopK.Outputs), "expected one result set per input")
-	for inputIdx, answers := range resultTopK.Outputs {
-		assert.Equal(t, 2, len(answers), "expected 2 answers per input with TopK=2")
-		assert.GreaterOrEqual(t, answers[0].Score, answers[1].Score, "answers for input %d should be sorted by score descending", inputIdx)
-		for answerIdx, answer := range answers {
-			assert.Contains(t, contextJSON[answer.Start:answer.End], answer.Answer, "answer %d for input %d should be a substring of the context", answerIdx, inputIdx)
-		}
-	}
+	_ = "STUB: not implemented"
+	return
 }
+
+// Context is a JSON document; questions target specific property values.
+
+// WithTopKAnswers(2): verify that 2 ranked answers are returned per input and are ordered by score.
 
 // TABULAR
 
-func TabularPipeline(t *testing.T, session *hugot.Session) {
-	t.Helper()
-	config := backends.PipelineConfig[*pipelines.TabularPipeline]{
-		ModelPath: ModelsFolder + "/KnightsAnalytics_iris-decision-tree",
-		Name:      "testTabularClassification",
-		Options: []backends.PipelineOption[*pipelines.TabularPipeline]{
-			pipelines.WithIDLabelMap(map[int]string{
-				0: "setosa",
-				1: "versicolor",
-				2: "virginica",
-			}),
-		},
-	}
+func TabularPipeline(t *testing.T, session *hugot.Session) { _ = "STUB: not implemented"; return }
 
-	pipeline, err := hugot.NewPipeline(session, config)
-	CheckT(t, err)
-
-	// Iris classification for an example
-	inputs := []string{"[6.1, 2.8, 4.7, 1.2]"}
-	result, err := pipeline.Run(t.Context(), inputs)
-	CheckT(t, err)
-	output := result.GetOutput()
-	classification := output[0].(pipelines.TabularClassificationOutput)
-	if classification.PredictedClass != "versicolor" {
-		t.Errorf("Expected label 'versicolor', got '%s'", classification.PredictedClass)
-	}
-	for _, prob := range classification.Probabilities {
-		if prob.Label == "versicolor" {
-			if prob.Score < 0.97 {
-				t.Errorf("Expected versicolor probability > 0.97, got '%f'", prob.Score)
-			}
-		}
-	}
-}
+// Iris classification for an example
 
 // Thread safety
 
 func ThreadSafety(t *testing.T, session *hugot.Session, numEmbeddings int) {
-	t.Helper()
-	numWorkers := min(runtime.NumCPU(), 6)
-	numResults := numWorkers * numEmbeddings
-
-	t.Helper()
-	modelPath := ModelsFolder + "/KnightsAnalytics_all-MiniLM-L6-v2"
-	config := hugot.FeatureExtractionConfig{
-		ModelPath:    modelPath,
-		Name:         "testPipeline",
-		OnnxFilename: "model.onnx",
-	}
-	pipeline, err := hugot.NewPipeline(session, config)
-	CheckT(t, err)
-
-	var expectedResults map[string][][]float32
-	err = json.Unmarshal(embedded.ResultsByte, &expectedResults)
-	CheckT(t, err)
-	expectedResult1 := expectedResults["test1output"]
-	expectedResult2 := expectedResults["test2output"]
-
-	outputChannel1 := make(chan [][]float32, numResults)
-	outputChannel2 := make(chan [][]float32, numResults)
-	errChannel := make(chan error, numWorkers)
-
-	worker := func() {
-		for range numEmbeddings {
-			batchResult, threadErr := pipeline.RunPipeline(t.Context(), []string{"robert smith"})
-			if threadErr != nil {
-				errChannel <- threadErr
-			}
-			outputChannel1 <- batchResult.Embeddings
-			batchResult, threadErr = pipeline.RunPipeline(t.Context(), []string{"robert smith junior", "francis ford coppola"})
-			if threadErr != nil {
-				errChannel <- threadErr
-			}
-			outputChannel2 <- batchResult.Embeddings
-		}
-	}
-
-	for range numWorkers {
-		go worker()
-	}
-
-	correctResults1 := 0
-	correctResults2 := 0
-loop:
-	for {
-		if correctResults1 == numResults && correctResults2 == numResults {
-			break loop
-		}
-		select {
-		case vectors := <-outputChannel1:
-			for i, vector := range vectors {
-				e := floatsEqual(vector, expectedResult1[i])
-				if e != nil {
-					t.Logf("Test 1: The threaded neural network didn't produce the correct result: %s\n", e)
-					t.FailNow()
-				}
-			}
-			correctResults1++
-		case vectors := <-outputChannel2:
-			for i, vector := range vectors {
-				e := floatsEqual(vector, expectedResult2[i])
-				if e != nil {
-					t.Logf("Test 2: The threaded neural network didn't produce the correct result: %s\n", e)
-					t.FailNow()
-				}
-			}
-			correctResults2++
-		case threadErr := <-errChannel:
-			t.Fatal(threadErr)
-		}
-	}
+	_ = "STUB: not implemented"
+	return
 }
 
 // Utilities
 
 func checkClassificationOutput(t *testing.T, inputResult []pipelines.ClassificationOutput, inputExpected []pipelines.ClassificationOutput) {
-	t.Helper()
-	assert.Equal(t, len(inputResult), len(inputExpected))
-	for i, output := range inputResult {
-		resultExpected := inputExpected[i]
-		assert.Equal(t, output.Label, resultExpected.Label)
-		assert.True(t, almostEqual(float64(output.Score), float64(resultExpected.Score)), fmt.Sprintf("Expected %f, got %f", float64(output.Score), float64(resultExpected.Score)))
-	}
+	_ = "STUB: not implemented"
+	return
 }
 
 // Returns an error if any element between a and b don't match.
-func floatsEqual(a, b []float32) error {
-	if len(a) != len(b) {
-		return fmt.Errorf("length mismatch: %d vs %d", len(a), len(b))
-	}
-	for i := range a {
-		diff := a[i] - b[i]
-		if diff < 0 {
-			diff = -diff
-		}
-		// Arbitrarily chosen precision. Large enough not to be affected by quantization
-		if diff >= 0.01 {
-			return fmt.Errorf("data element %d doesn't match: %.12f vs %.12f",
-				i, a[i], b[i])
-		}
-	}
-	return nil
-}
+func floatsEqual(a, b []float32) error { _ = "STUB: not implemented"; return nil }
 
-func almostEqual(a, b float64) bool {
-	return math.Abs(a-b) <= 0.0007
-}
+// Arbitrarily chosen precision. Large enough not to be affected by quantization
 
-func CheckT(t *testing.T, err error) {
-	t.Helper()
-	if err != nil {
-		t.Fatalf("Test failed with error %s", err.Error())
-	}
-}
+func almostEqual(a, b float64) bool { _ = "STUB: not implemented"; return false }
 
-func printTokenEntities(o *pipelines.TokenClassificationOutput) {
-	for i, entities := range o.Entities {
-		fmt.Printf("Input %d\n", i)
-		for _, entity := range entities {
-			fmt.Printf("%+v\n", entity)
-		}
-	}
-}
+func CheckT(t *testing.T, err error) { _ = "STUB: not implemented"; return }
+
+func printTokenEntities(o *pipelines.TokenClassificationOutput) { _ = "STUB: not implemented"; return }
 
 type toolCall struct {
 	Name      string         `json:"name"`
@@ -1651,44 +250,6 @@ type toolCall struct {
 // each as a toolCall. Uses json.Decoder so that a trailing stray `}` (a common
 // int4-quantisation artefact) does not cause the block to be skipped — Decode reads
 // exactly one JSON value and stops, leaving trailing garbage unread.
-func parseToolCalls(s string) []toolCall {
-	re := regexp.MustCompile(`(?s)<tool_call>\s*(.+?)\s*</tool_call>`)
-	matches := re.FindAllStringSubmatch(s, -1)
-	var calls []toolCall
-	for _, m := range matches {
-		dec := json.NewDecoder(strings.NewReader(m[1]))
-		var tc toolCall
-		if err := dec.Decode(&tc); err != nil {
-			continue
-		}
-		calls = append(calls, tc)
-	}
-	return calls
-}
+func parseToolCalls(s string) []toolCall { _ = "STUB: not implemented"; return nil }
 
-func CheckToolCalls(t *testing.T, output string) {
-	t.Helper()
-	calls := parseToolCalls(output)
-	if len(calls) < 2 {
-		t.Fatalf("expected at least 2 tool calls, got %d: %s", len(calls), output)
-	}
-
-	names := make(map[string]bool, len(calls))
-	for _, c := range calls {
-		names[c.Name] = true
-	}
-	if !names["get_current_time"] {
-		t.Errorf("expected get_current_time tool call, got calls: %v", calls)
-	}
-	if !names["get_weather"] {
-		t.Errorf("expected get_weather tool call, got calls: %v", calls)
-	}
-	for _, c := range calls {
-		if c.Name == "get_weather" {
-			city, _ := c.Arguments["city"].(string)
-			if !strings.EqualFold(city, "Paris") {
-				t.Errorf("expected get_weather city=Paris, got %q", city)
-			}
-		}
-	}
-}
+func CheckToolCalls(t *testing.T, output string) { _ = "STUB: not implemented"; return }

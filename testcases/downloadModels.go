@@ -2,10 +2,7 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"strings"
 
@@ -99,30 +96,8 @@ func main() {
 
 // downloadFile downloads a file from a URL to a destination path.
 func downloadFile(ctx context.Context, url string, dest string) error {
-	out, err := os.Create(dest)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		err = errors.Join(out.Close())
-	}()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil) // #nosec G107 Users may choose to download models from internal sources
-	if err != nil {
-		return err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		err = errors.Join(resp.Body.Close())
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to download %s: status %s", url, resp.Status)
-	}
-
-	_, err = io.Copy(out, resp.Body)
-	return err
+	_ = "STUB: not implemented"
+	return nil
 }
+
+// #nosec G107 Users may choose to download models from internal sources

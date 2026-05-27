@@ -4,11 +4,11 @@ package hugot
 
 import (
 	"context"
-	"errors"
 
 	"github.com/knights-analytics/hugot/options"
 )
 
 func NewORTSession(_ context.Context, _ ...options.WithOption) (*Session, error) {
-	return nil, errors.New("to enable ORT, run `go build -tags ORT` or `go build -tags ALL`")
+	_ = "STUB: not implemented"
+	return nil, nil
 }

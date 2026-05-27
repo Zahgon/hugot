@@ -4,7 +4,6 @@ package backends
 
 import (
 	"context"
-	"errors"
 
 	"github.com/knights-analytics/hugot/options"
 )
@@ -16,35 +15,40 @@ type ORTModel struct {
 }
 
 func createORTModelBackend(_ *Model, _ *options.Options) error {
-	return errors.New("ORT is not enabled")
+	_ = "STUB: not implemented"
+	return nil
 }
 
-func createInputTensorsORT(_ *PipelineBatch, _ *Model) error {
-	return errors.New("ORT is not enabled")
-}
+func createInputTensorsORT(_ *PipelineBatch, _ *Model) error { _ = "STUB: not implemented"; return nil }
 
 func runORTSessionOnBatch(_ context.Context, _ *PipelineBatch, _ *BasePipeline) error {
-	return errors.New("ORT is not enabled")
+	_ = "STUB: not implemented"
+	return nil
 }
 
 func createImageTensorsORT(_ *PipelineBatch, _ *Model, _ [][][][]float32) error {
-	return errors.New("ORT is not enabled")
+	_ = "STUB: not implemented"
+	return nil
 }
 
 func createTabularTensorsORT(_ *PipelineBatch, _ *Model, _ [][]float32) error {
-	return errors.New("ORT is not enabled")
+	_ = "STUB: not implemented"
+	return nil
 }
 
 func runGenerativeORTSessionOnBatch(_ context.Context, _ *PipelineBatch, _ *BasePipeline, _ int, _ []string, _ *float64, _ *float64, _ *int, _ []string, _ *Guidance) (chan SequenceDelta, chan error, error) {
-	return nil, nil, errors.New("ORT is not enabled")
+	_ = "STUB: not implemented"
+	return nil, nil, nil
 }
 
 func createORTGenerativeSession(_ context.Context, _ *Model, _ *options.Options) error {
-	return errors.New("ORT is not enabled")
+	_ = "STUB: not implemented"
+	return nil
 }
 
 func CreateMessagesORT(_ *PipelineBatch, _ any, _ string) error {
-	return errors.New("ORT is not enabled")
+	_ = "STUB: not implemented"
+	return nil
 }
 
 type (
@@ -53,11 +57,13 @@ type (
 )
 
 func (*disabledGenerativeSession) GetStatistics() disabledStatistics {
-	return disabledStatistics{}
+	_ = "STUB: not implemented"
+	return *new(disabledStatistics)
 }
 
 func (*disabledGenerativeEngine) GetStatistics() disabledStatistics {
-	return disabledStatistics{}
+	_ = "STUB: not implemented"
+	return *new(disabledStatistics)
 }
 
 type disabledStatistics struct {

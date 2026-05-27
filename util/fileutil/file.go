@@ -2,16 +2,10 @@ package fileutil
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"errors"
 	"io"
-	"path/filepath"
-	"strings"
 
 	"github.com/viant/afs"
-	"github.com/viant/afs/option"
-	"github.com/viant/afs/option/content"
 	"github.com/viant/afs/storage"
 )
 
@@ -20,35 +14,17 @@ var fileSystem = afs.New()
 const partSize = 64 * 1024 * 1024
 
 func ReadFileBytes(ctx context.Context, filename string) ([]byte, error) {
-	file, err := fileSystem.OpenURL(ctx, filename)
-	if err != nil {
-		return nil, err
-	}
-	defer func(file io.Closer) {
-		err = errors.Join(err, CloseFile(file))
-	}(file)
-
-	buf := &bytes.Buffer{}
-	_, readErr := io.Copy(buf, file)
-	if readErr != nil {
-		return nil, readErr
-	}
-	return buf.Bytes(), err
+	_ = "STUB: not implemented"
+	return nil, nil
 }
 
-func CloseFile(file io.Closer) error {
-	return file.Close()
-}
+func CloseFile(file io.Closer) error { _ = "STUB: not implemented"; return nil }
 
-func GetPathType(path string) string {
-	if strings.HasPrefix(path, "s3://") {
-		return "S3"
-	}
-	return "os"
-}
+func GetPathType(path string) string { _ = "STUB: not implemented"; return "" }
 
 func OpenFile(ctx context.Context, filename string) (io.ReadCloser, error) {
-	return fileSystem.OpenURL(ctx, filename)
+	_ = "STUB: not implemented"
+	return *new(io.ReadCloser), nil
 }
 
 // ReadLine returns a single line (without the ending \n)
@@ -56,69 +32,37 @@ func OpenFile(ctx context.Context, filename string) (io.ReadCloser, error) {
 // An error is returned if there is an error with the
 // buffered reader.
 // This function is needed to avoid the 65K char line limit.
-func ReadLine(r *bufio.Reader) ([]byte, error) {
-	var (
-		isPrefix = true
-		err      error
-		line, ln []byte
-	)
-	for isPrefix && err == nil {
-		line, isPrefix, err = r.ReadLine()
-		ln = append(ln, line...)
-	}
-	return ln, err
-}
+func ReadLine(r *bufio.Reader) ([]byte, error) { _ = "STUB: not implemented"; return nil, nil }
 
 // PathJoinSafe wrapper around filepath.Join to ensure that paths are correctly constructed
 // if the path is a normal OS path, just use filepath.Join
 // if the path is S3, trim any trailing slashes and construct it manually from the components
 // so that double slashes (e.g. s3://) are preserved.
-func PathJoinSafe(elem ...string) string {
-	var path string
-
-	switch GetPathType(elem[0]) {
-	case "S3":
-		basePath := strings.TrimSuffix(elem[0], "/")
-		path = basePath + string(filepath.Separator) + filepath.Join(elem[1:]...)
-	default:
-		path = filepath.Join(elem...)
-	}
-	return path
-}
+func PathJoinSafe(elem ...string) string { _ = "STUB: not implemented"; return "" }
 
 func CopyFile(ctx context.Context, from string, to string) error {
-	return fileSystem.Copy(ctx, from, to, option.NewSource(option.NewStream(partSize, 0)), option.NewDest(option.NewSkipChecksum(true)))
+	_ = "STUB: not implemented"
+	return nil
 }
 
 func WalkDir() func(ctx context.Context, URL string, handler storage.OnVisit, options ...storage.Option) error {
-	return fileSystem.Walk
+	_ = "STUB: not implemented"
+	return nil
 }
 
-func DeleteFile(ctx context.Context, filename string) error {
-	return fileSystem.Delete(ctx, filename)
-}
+func DeleteFile(ctx context.Context, filename string) error { _ = "STUB: not implemented"; return nil }
 
 func FileExists(ctx context.Context, filename string) (bool, error) {
-	return fileSystem.Exists(ctx, filename)
+	_ = "STUB: not implemented"
+	return false, nil
 }
 
 func FileStats(ctx context.Context, filename string) (storage.Object, error) {
-	return fileSystem.Object(ctx, filename)
+	_ = "STUB: not implemented"
+	return *new(storage.Object), nil
 }
 
 func NewFileWriter(ctx context.Context, filename string, contentType string) (io.WriteCloser, error) {
-	exists, err := FileExists(ctx, filename)
-	if err != nil {
-		return nil, err
-	}
-	if exists {
-		err = fileSystem.Delete(ctx, filename)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if contentType != "" {
-		return fileSystem.NewWriter(ctx, filename, 0o644, content.NewMeta(content.Type, contentType), option.NewSkipChecksum(true))
-	}
-	return fileSystem.NewWriter(ctx, filename, 0o644, option.NewSkipChecksum(true))
+	_ = "STUB: not implemented"
+	return *new(io.WriteCloser), nil
 }

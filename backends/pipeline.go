@@ -2,16 +2,9 @@ package backends
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"math"
-	"strings"
 	"time"
 
 	"github.com/knights-analytics/hugot/options"
-	"github.com/knights-analytics/hugot/util/fileutil"
-	"github.com/knights-analytics/hugot/util/safeconv"
 )
 
 // BasePipeline can be embedded by a pipeline.
@@ -32,22 +25,12 @@ type InputOutputInfo struct {
 }
 type Shape []int64
 
-func (s Shape) String() string {
-	return fmt.Sprintf("%v", []int64(s))
-}
+func (s Shape) String() string { _ = "STUB: not implemented"; return "" }
 
-func (s Shape) ValuesInt() []int {
-	output := make([]int, len(s))
-	for i, v := range s {
-		output[i] = int(v)
-	}
-	return output
-}
+func (s Shape) ValuesInt() []int { _ = "STUB: not implemented"; return nil }
 
 // NewShape Returns a Shape, with the given dimensions.
-func NewShape(dimensions ...int64) Shape {
-	return dimensions
-}
+func NewShape(dimensions ...int64) Shape { _ = "STUB: not implemented"; return *new(Shape) }
 
 type OutputInfo struct {
 	Name       string
@@ -91,26 +74,16 @@ type PipelineStatistics struct {
 }
 
 func (p *PipelineStatistics) ComputeTokenizerStatistics(timings *timings) {
-	p.TokenizerTotalTime = safeconv.U64ToDuration(timings.TotalNS)
-	p.TokenizerExecutionCount = timings.NumCalls
-	p.TokenizerAvgQueryTime = time.Duration(float64(timings.TotalNS) /
-		math.Max(1, float64(timings.NumCalls)))
+	_ = "STUB: not implemented"
+	return
 }
 
 func (p *PipelineStatistics) ComputeOnnxStatistics(timings *timings) {
-	p.OnnxTotalTime = safeconv.U64ToDuration(timings.TotalNS)
-	p.OnnxExecutionCount = timings.NumCalls
-	p.OnnxAvgQueryTime = time.Duration(float64(timings.TotalNS) /
-		math.Max(1, float64(timings.NumCalls)))
+	_ = "STUB: not implemented"
+	return
 }
 
-func (p *PipelineStatistics) Print() {
-	jsonData, err := json.MarshalIndent(p, "", "  ")
-	if err != nil {
-		fmt.Println(err)
-	}
-	fmt.Println(string(jsonData))
-}
+func (p *PipelineStatistics) Print() { _ = "STUB: not implemented"; return }
 
 // PipelineOption is an option for a pipeline type.
 type PipelineOption[T Pipeline] func(eo T) error
@@ -158,143 +131,54 @@ type PipelineBatch struct {
 	DestroyMultimodal func() error
 }
 
-func (b *PipelineBatch) Destroy() error {
-	var err error
-	if b.DestroyInputs != nil {
-		err = errors.Join(err, b.DestroyInputs())
-	}
-	if b.DestroyMultimodal != nil {
-		err = errors.Join(err, b.DestroyMultimodal())
-	}
-	return err
-}
+func (b *PipelineBatch) Destroy() error { _ = "STUB: not implemented"; return nil }
 
 // NewBatch initializes a new batch for inference.
-func NewBatch(size int) *PipelineBatch {
-	return &PipelineBatch{
-		DestroyInputs: func() error {
-			return nil
-		},
-		DestroyMultimodal: func() error {
-			return nil
-		},
-		Size: size,
-	}
-}
+func NewBatch(size int) *PipelineBatch { _ = "STUB: not implemented"; return nil }
 
-func GetNames(info []InputOutputInfo) []string {
-	names := make([]string, 0, len(info))
-	for _, v := range info {
-		names = append(names, v.Name)
-	}
-	return names
-}
+func GetNames(info []InputOutputInfo) []string { _ = "STUB: not implemented"; return nil }
 
 func RunSessionOnBatch(ctx context.Context, batch *PipelineBatch, p *BasePipeline) error {
-	switch p.Runtime {
-	case "ORT":
-		return runORTSessionOnBatch(ctx, batch, p)
-	case "GO", "XLA":
-		return runGoMLXSessionOnBatch(ctx, batch, p)
-	}
+	_ = "STUB: not implemented"
 	return nil
 }
 
 func RunGenerativeSessionOnBatch(ctx context.Context, batch *PipelineBatch, p *BasePipeline, maxLength int, stopSequences []string, temperature *float64, topP *float64, seed *int, tools []string, guidance *Guidance) (chan SequenceDelta, chan error, error) {
-	switch p.Runtime {
-	case "ORT":
-		return runGenerativeORTSessionOnBatch(ctx, batch, p, maxLength, stopSequences, temperature, topP, seed, tools, guidance)
-	case "GO":
-		return nil, nil, errors.New("GO backend is not yet implemented for generative models")
-	case "XLA":
-		return nil, nil, errors.New("XLA backend is not yet implemented for generative models")
-	default:
-		return nil, nil, errors.New("invalid backend")
-	}
+	_ = "STUB: not implemented"
+	return nil, nil, nil
 }
 
 func CreateMessages(batch *PipelineBatch, p *BasePipeline, inputs any, systemPrompt string) error {
-	switch p.Runtime {
-	case "ORT":
-		return CreateMessagesORT(batch, inputs, systemPrompt)
-	case "GO", "XLA":
-		return fmt.Errorf("not implemented")
-	}
+	_ = "STUB: not implemented"
 	return nil
 }
 
 // CreateInputTensorsTraining creates input tensors for training. Same as CreateInputTensors but
 // we never pad the batch size as we expect regular batch sizes from the dataset.
 func CreateInputTensorsTraining(batch *PipelineBatch, model *Model, runtime string) error {
-	switch runtime {
-	case "ORT":
-		return createInputTensorsORT(batch, model)
-	case "GO":
-		return createInputTensorsGoMLX(batch, model, false, false)
-	case "XLA":
-		return createInputTensorsGoMLX(batch, model, false, true)
-	}
+	_ = "STUB: not implemented"
 	return nil
 }
 
 func CreateInputTensors(batch *PipelineBatch, model *Model, runtime string) error {
-	switch runtime {
-	case "ORT":
-		return createInputTensorsORT(batch, model)
-	case "GO":
-		if model.GoMLXModel.MaxCache > 0 {
-			// only pad the batch dimension if we have a limited cache
-			return createInputTensorsGoMLX(batch, model, true, true)
-		}
-		return createInputTensorsGoMLX(batch, model, false, false)
-	case "XLA":
-		return createInputTensorsGoMLX(batch, model, true, true)
-	}
+	_ = "STUB: not implemented"
 	return nil
 }
 
+// only pad the batch dimension if we have a limited cache
+
 // CreateTabularTensors builds input tensors for classic ML/tabular models.
 func CreateTabularTensors(batch *PipelineBatch, model *Model, features [][]float32, runtime string) error {
-	switch runtime {
-	case "ORT":
-		return createTabularTensorsORT(batch, model, features)
-	case "GO", "XLA":
-		return createTabularTensorsGoMLX(batch, model, features)
-	default:
-		return fmt.Errorf("invalid runtime %s", runtime)
-	}
+	_ = "STUB: not implemented"
+	return nil
 }
 
 func NewBasePipeline[T Pipeline](sessionContext context.Context, config PipelineConfig[T], s *options.Options, model *Model) (*BasePipeline, error) {
-	pipeline := &BasePipeline{}
-	pipeline.Runtime = s.Backend
-	pipeline.PipelineName = config.Name
-	pipeline.Model = model
-	pipeline.PipelineTimings = &timings{}
-	pipeline.SessionContext = sessionContext
-	return pipeline, nil
+	_ = "STUB: not implemented"
+	return nil, nil
 }
 
 func CreateModelBackend(ctx context.Context, model *Model, s *options.Options) error {
-	err := GetOnnxModelPath(ctx, model)
-	if err != nil {
-		return err
-	}
-
-	if strings.HasPrefix(model.Path, "s3:") {
-		reader, readErr := fileutil.OpenFile(ctx, fileutil.PathJoinSafe(model.Path, model.OnnxPath))
-		if readErr != nil {
-			return readErr
-		}
-		model.OnnxReader = reader
-	}
-
-	switch s.Backend {
-	case "ORT":
-		err = createORTModelBackend(model, s)
-	case "GO", "XLA":
-		err = createGoMLXModelBackend(model, s)
-	}
-
-	return err
+	_ = "STUB: not implemented"
+	return nil
 }

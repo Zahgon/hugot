@@ -2,22 +2,20 @@
 
 package backends
 
-import "errors"
-
 type RustTokenizer struct{}
 
-func loadRustTokenizer(_ []byte, _ *Model) error {
-	return errors.New("rust Tokenizer is not enabled")
+func loadRustTokenizer(_ []byte, _ *Model) error { _ = "STUB: not implemented"; return nil }
+
+func tokenizeInputsRust(_ *PipelineBatch, _ *Tokenizer, _ []string) {
+	_ = "STUB: not implemented"
+	return
 }
 
-func tokenizeInputsRust(_ *PipelineBatch, _ *Tokenizer, _ []string) {}
-
-func tokenizeInputPairsRust(_ *PipelineBatch, _ *Tokenizer, _ [][2]string, _ string) {}
-
-func decodeRust(_ []uint32, _ *Tokenizer, _ bool) string {
-	return ""
+func tokenizeInputPairsRust(_ *PipelineBatch, _ *Tokenizer, _ [][2]string, _ string) {
+	_ = "STUB: not implemented"
+	return
 }
 
-func allInputTokensRust(_ *BasePipeline) error {
-	return errors.New("rust Tokenizer is not enabled")
-}
+func decodeRust(_ []uint32, _ *Tokenizer, _ bool) string { _ = "STUB: not implemented"; return "" }
+
+func allInputTokensRust(_ *BasePipeline) error { _ = "STUB: not implemented"; return nil }
